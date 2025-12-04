@@ -1,0 +1,55 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  /* Fonts */
+  --font-mono: "Consolas", "Monaco", "Courier New", monospace;
+  --font-sans: "Inter", system-ui, sans-serif;
+
+  /* Colors: Cyber */
+  --color-cyber-900: #0f172a;
+  --color-cyber-800: #1e293b;
+  --color-cyber-700: #334155;
+
+  /* Colors: Neon */
+  --color-neon-blue: #00f3ff;
+
+  /* Shadows */
+  --shadow-soft: 0 4px 20px -2px rgba(0, 0, 0, 0.1);
+  --shadow-glow-blue: 0 0 20px rgba(0, 243, 255, 0.3);
+}
+
+/* Custom utilities */
+@layer utilities {
+  .glow-blue {
+    box-shadow: 0 0 20px rgba(0, 243, 255, 0.3);
+  }
+
+  .glow-text {
+    text-shadow: 0 0 10px rgba(0, 243, 255, 0.5);
+  }
+
+  .terminal-cursor::after {
+    content: '█';
+    animation: blink 1s infinite;
+    color: #00f3ff;
+  }
+}
+
+@keyframes blink {
+
+  0%,
+  50% {
+    opacity: 1;
+  }
+
+  51%,
+  100% {
+    opacity: 0;
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+}
