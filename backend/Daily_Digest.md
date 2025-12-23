@@ -22,25 +22,101 @@ A daily digest page for a personal website displaying RSS feed entries as Vue ca
 
 ## Architecture Diagram
 
-```
-User Request Path:
+### Production Architecture
 
-┌──────────┐     ┌─────────────────┐     ┌─────────────┐     ┌───────────┐     ┌──────────────────┐
-│  User    │────▶│  Vue Frontend   │────▶│   FastAPI   │────▶│ TTLCache  │────▶│    PostgreSQL    │
-│ (Browser)│     │  (Vite build)   │     │   Backend   │     │ (300s)    │     │  (Miniflux DB)   │
-└──────────┘     └─────────────────┘     └─────────────┘     └───────────┘     └──────────────────┘
-                   Infinite Scroll         /api/digest           │                      ▲
-                   Max 42 cards            /health               │ cache miss           │
-                                                                 └──────────────────────┤
-                                                                                        │ writes
-                                                                               ┌────────┴────────┐
-                                                                               │    Miniflux     │
-                                                                               │    Server       │
-                                                                               └────────┬────────┘
-                                                                                        │ fetches
-                                                                               ┌────────┴────────┐
-                                                                               │  RSS Feeds      │
-                                                                               └─────────────────┘
+```
+User Request Flow:
+
+┌──────────┐
+│  User    │
+│ (Browser)│
+└─────┬────┘
+      │
+      ├─────────────────────────────────────┐
+      │                                     │
+      ↓                                     ↓
+┌─────────────────┐              ┌──────────────────────┐
+│   S3 Bucket     │              │   EC2 Instance       │
+│  (Vue Static)   │              │  (Public IP/DNS)     │
+│   - index.html  │              │                      │
+│   - assets/     │              │  ┌────────────────┐  │
+│   - *.js, *.css │              │  │ Nginx (80/443) │  │
+└─────────────────┘              │  │ Rate Limiting  │  │
+                                 │  └────────┬───────┘  │
+      Vue app loaded                        │           │
+      from S3 makes API                     ↓           │
+      requests to EC2 ───────────────▶ ┌─────────────┐  │
+      (CORS enabled)                   │  FastAPI    │  │
+                                       │  (port 8000)│  │
+                                       └──────┬──────┘  │
+                                              │         │
+                                              ↓         │
+                                       ┌─────────────┐  │
+                                       │  TTLCache   │  │
+                                       │  (1800s)    │  │
+                                       └──────┬──────┘  │
+                                              │         │
+                                    cache miss│         │
+                                              ↓         │
+                                       ┌─────────────┐  │
+                                       │  Miniflux   │  │
+                                       │ (port 8080) │  │
+                                       └──────┬──────┘  │
+                                              │         │
+                                              ↓         │
+                                       ┌─────────────┐  │
+                                       │ PostgreSQL  │  │
+                                       │ (port 5432) │  │
+                                       └─────────────┘  │
+                                                        │
+                                 Docker Network         │
+                                 (internal only)        │
+└──────────────────────────────────────────────────────┘
+
+External RSS Feeds ─────▶ Miniflux (fetches & stores)
+```
+
+### Container Layout on EC2
+
+```
+EC2 Security Group:
+- Inbound: 80/443 from 0.0.0.0/0
+- Outbound: All
+
+Docker Containers (same network):
+┌─────────────────────────────────────┐
+│  nginx:latest                       │
+│  Ports: 80:80, 443:443 (exposed)   │
+│  - Reverse proxy to FastAPI         │
+│  - Rate limiting: 10 req/s          │
+│  - TLS termination                  │
+│  - Pass-through (no header mods)    │
+└─────────────────────────────────────┘
+            │
+            ↓ (internal network)
+┌─────────────────────────────────────┐
+│  fastapi-backend                    │
+│  Port: 8000 (internal only)         │
+│  - API endpoints                    │
+│  - CORS middleware (production)     │
+│  - Caching layer                    │
+└─────────────────────────────────────┘
+            │
+            ↓ (internal network)
+┌─────────────────────────────────────┐
+│  miniflux:latest                    │
+│  Port: 8080 (internal only)         │
+│  - RSS aggregation                  │
+│  - Feed management                  │
+└─────────────────────────────────────┘
+            │
+            ↓ (internal network)
+┌─────────────────────────────────────┐
+│  postgres:17                        │
+│  Port: 5432 (internal only)         │
+│  - Persistent volume                │
+│  - Shared by Miniflux + FastAPI     │
+└─────────────────────────────────────┘
 ```
 
 ## API Endpoints
@@ -82,15 +158,16 @@ Health check endpoint.
 
 - **Infinite scroll**: Loads 6 entries at a time when user scrolls within 200px of bottom
 - **Max cards**: Stops loading after 42 cards
-- **Same-origin**: Uses relative API paths in production (`/api/digest`)
+- **Cross-origin**: Vue app from S3 calls EC2 public IP/DNS for API
 - **Development**: Supports `VITE_API_BASE` env var for separate backend
+- **Production**: `VITE_API_BASE` set to EC2 public endpoint (e.g., `https://ec2-xx-xxx-xxx-xxx.compute.amazonaws.com`)
 
 ## Caching
 
-| Setting | Default | Environment Variable |
-|---------|---------|---------------------|
-| TTL | 300 seconds | `CACHE_TTL` |
-| Max Size | 10 entries | `CACHE_MAX_SIZE` |
+| Setting | Default | Recommended Production | Environment Variable |
+|---------|---------|------------------------|---------------------|
+| TTL | 300 seconds | 1800 seconds (30 min) | `CACHE_TTL` |
+| Max Size | 10 entries | 10 entries | `CACHE_MAX_SIZE` |
 
 Cache key format: `digest:{offset}:{limit}`
 
@@ -104,7 +181,7 @@ Cache key format: `digest:{offset}:{limit}`
 | `ENVIRONMENT` | No | `development` | `development` or `production` |
 | `CACHE_TTL` | No | `300` | Cache TTL in seconds |
 | `CACHE_MAX_SIZE` | No | `10` | Max cached entries |
-| `CORS_ORIGINS` | No | localhost:5173 | Dev only, comma-separated |
+| `CORS_ORIGINS` | Production | - | S3 bucket URL in production, localhost in dev |
 
 ### Frontend Environment Variables
 
@@ -114,13 +191,36 @@ Cache key format: `digest:{offset}:{limit}`
 
 ## Security Features
 
-- **Same-origin deployment**: No CORS needed in production
-- **CORS dev-only**: Middleware only loaded when `ENVIRONMENT=development`
-- **Docs disabled in production**: `/docs` and `/redoc` return 404
-- **Config validation**: App exits on startup if production config is invalid
-- **Parameterized queries**: SQL injection protection via psycopg
-- **Input validation**: FastAPI Query constraints on offset/limit
-- **No hardcoded secrets**: All credentials via environment variables
+### Separation of Concerns
+
+**Nginx Layer (Traffic Management):**
+- Rate limiting: 10 requests/second per IP, burst 20
+- TLS termination (HTTPS enforcement)
+- Reverse proxy to FastAPI (pass-through only)
+- No header modification or CORS handling
+
+**FastAPI Layer (Application Logic):**
+- CORS protection: Middleware allows S3 bucket origin only in production
+- Docs disabled in production: `/docs` and `/redoc` return 404
+- Config validation: App exits on startup if production config is invalid
+- Parameterized queries: SQL injection protection via psycopg
+- Input validation: Query constraints on offset/limit
+- No hardcoded secrets: All credentials via environment variables
+
+### Infrastructure Security
+- **S3 bucket**: Public read-only for static files (no write access)
+- **EC2 security group**: Only ports 80/443 open to internet
+- **Container isolation**: FastAPI, Miniflux, PostgreSQL not exposed to internet
+- **Docker network**: Internal-only communication between containers
+- **Nginx TLS termination**: HTTPS enforced (with Let's Encrypt or self-signed cert)
+
+### CORS Configuration Notes
+
+Unlike same-origin deployments, this architecture requires CORS because:
+- Frontend served from: `https://your-bucket.s3.amazonaws.com`
+- Backend served from: `https://ec2-xx-xxx-xxx-xxx.compute.amazonaws.com`
+
+**Important:** FastAPI CORS middleware MUST be enabled in production with `CORS_ORIGINS` set to S3 bucket URL(s). Nginx does NOT add or modify CORS headers - it passes responses through unchanged. This keeps CORS policy enforcement at the application layer where it belongs.
 
 ## Logging & Monitoring
 
@@ -416,7 +516,81 @@ docker-compose up -d
 
 ## Production Deployment
 
-1. Frontend and backend served from same origin (no CORS)
-2. Reverse proxy routes `/api/*` to FastAPI, `/*` to static files
-3. Set `ENVIRONMENT=production` and `DATABASE_URL`
-4. Database credentials via environment variables only
+### Overview
+
+This architecture separates static assets (S3) from dynamic backend (EC2) for cost optimization while gaining AWS practice with EC2, Docker, and Nginx.
+
+### Deployment Components
+
+1. **S3 Bucket**: Hosts Vue static files with public read access
+2. **EC2 Instance**: Runs Docker containers (Nginx, FastAPI, Miniflux, PostgreSQL)
+3. **Docker Compose**: Orchestrates all containers on single EC2 instance
+4. **Nginx**: Reverse proxy with rate limiting and TLS termination (pass-through only, no header modification)
+5. **FastAPI**: Handles CORS policy - configured to accept requests from S3 bucket origin only
+
+### Configuration Requirements
+
+**Backend (.env on EC2):**
+```bash
+ENVIRONMENT=production
+DATABASE_URL=postgresql://miniflux:PASSWORD@postgres:5432/miniflux
+CACHE_TTL=1800  # 30 minutes recommended
+CACHE_MAX_SIZE=10
+
+# CORS - S3 bucket URL (REQUIRED in production for this architecture)
+CORS_ORIGINS=https://your-bucket-name.s3.amazonaws.com,https://your-bucket-name.s3.us-east-1.amazonaws.com
+
+# Miniflux
+MINIFLUX_ADMIN_USERNAME=admin
+MINIFLUX_ADMIN_PASSWORD=SECURE_PASSWORD
+MINIFLUX_DATABASE_URL=postgresql://miniflux:PASSWORD@postgres:5432/miniflux?sslmode=disable
+
+# PostgreSQL
+POSTGRES_USER=miniflux
+POSTGRES_PASSWORD=PASSWORD
+POSTGRES_DB=miniflux
+```
+
+**Frontend (.env.production):**
+```bash
+# EC2 public endpoint
+VITE_API_BASE=https://ec2-xx-xxx-xxx-xxx.compute.amazonaws.com
+# OR use Elastic IP / custom domain
+VITE_API_BASE=https://api.yourdomain.com
+```
+
+### Deployment Steps
+
+1. **S3**: Upload Vue build (`dist/`) to S3 bucket, enable static website hosting
+2. **EC2**: Launch instance, install Docker & Docker Compose
+3. **Nginx**: Configure reverse proxy to FastAPI container with rate limiting
+4. **Docker Compose**: Start all containers with proper environment variables
+5. **DNS** (optional): Point custom domain to EC2 Elastic IP
+
+### Trade-offs of This Architecture
+
+**Advantages:**
+- Lower cost than ALB (~$18/month savings)
+- S3 for static assets (cheap, fast)
+- Docker practice on EC2
+- Nginx configuration experience
+- Clean separation of concerns (Nginx for traffic, FastAPI for logic)
+- Simple to understand and debug
+
+**Disadvantages:**
+- CORS required (S3 and EC2 are different origins)
+- No built-in auto-scaling (single EC2 instance)
+- Manual SSL certificate management (or use Let's Encrypt)
+- Single point of failure (no high availability)
+
+### Cost Estimate
+
+| Service | Configuration | Monthly Cost |
+|---------|--------------|--------------|
+| S3 | ~5GB storage + requests | $0.50 |
+| EC2 | t3.small (2vCPU, 2GB RAM) | $15.00 |
+| EBS | 30GB gp3 | $2.40 |
+| Elastic IP | 1 IP | $0.00 (free if attached) |
+| **TOTAL** | | **~$18/month** |
+
+Compare to ALB architecture: ~$35-40/month (saves ~$20/month)

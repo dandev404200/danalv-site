@@ -4,28 +4,86 @@
 #   POSTGRES_DB=miniflux
 #   MINIFLUX_ADMIN_USERNAME=<your-admin-username>
 #   MINIFLUX_ADMIN_PASSWORD=<strong-random-password>
+#   DATABASE_URL=postgresql://miniflux:<password>@postgres:5432/miniflux
+#   ENVIRONMENT=production
+#   CACHE_TTL=1800
+#   CACHE_MAX_SIZE=10
+#   CORS_ORIGINS=https://your-bucket.s3.amazonaws.com,https://your-bucket.s3.us-east-1.amazonaws.com
 #
 
 services:
+  # Nginx - Reverse proxy with rate limiting (only service exposed to internet)
+  nginx:
+    image: nginx:alpine
+    container_name: daily-digest-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro # Mount SSL certificates (create self-signed or use Let's Encrypt)
+      - nginx-logs:/var/log/nginx
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - daily-digest
+
+  # FastAPI Backend - API endpoints and CORS handling
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: daily-digest-backend
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - CACHE_TTL=${CACHE_TTL:-1800}
+      - CACHE_MAX_SIZE=${CACHE_MAX_SIZE:-10}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      miniflux:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - daily-digest
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Miniflux - RSS aggregation (internal only)
   miniflux:
     image: miniflux/miniflux:latest
-    ports:
-      - "80:8080"
+    container_name: daily-digest-miniflux
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db/${POSTGRES_DB}?sslmode=disable
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}?sslmode=disable
       - RUN_MIGRATIONS=1
       - CREATE_ADMIN=1
       - ADMIN_USERNAME=${MINIFLUX_ADMIN_USERNAME}
       - ADMIN_PASSWORD=${MINIFLUX_ADMIN_PASSWORD}
     restart: unless-stopped
+    networks:
+      - daily-digest
 
-  db:
+  # PostgreSQL - Database (internal only)
+  postgres:
     image: postgres:18-alpine
-    ports:
-      - "127.0.0.1:5432:5432" # Bind to localhost only, not exposed externally
+    container_name: daily-digest-postgres
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -37,7 +95,16 @@ services:
         ["CMD", "pg_isready", "-U", "${POSTGRES_USER}", "-d", "${POSTGRES_DB}"]
       interval: 10s
       start_period: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
+    networks:
+      - daily-digest
+
+networks:
+  daily-digest:
+    driver: bridge
 
 volumes:
   miniflux-db:
+  nginx-logs:

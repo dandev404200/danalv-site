@@ -6,7 +6,6 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.logging_config import setup_logging
-from app.middleware import RequestLoggingRoute
 from app.routers import digest
 
 # Setup logging first thing
@@ -22,24 +21,28 @@ app = FastAPI(
     redoc_url="/redoc" if settings.environment == "development" else None,
 )
 
-# CORS middleware - only needed in development when frontend/backend are on different ports
-# In production, frontend and backend are served from the same origin (no CORS needed)
-if settings.environment == "development":
+# CORS middleware - required in production (S3 frontend) and development
+# Production: S3 bucket origin(s) from CORS_ORIGINS env var
+# Development: localhost:5173 (default) or custom from CORS_ORIGINS
+if settings.should_enable_cors():
     from fastapi.middleware.cors import CORSMiddleware
 
-    logger.info("Development mode: Enabling CORS middleware")
+    cors_origins = settings.get_cors_origins()
+    logger.info(f"Enabling CORS middleware for origins: {cors_origins}")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.get_cors_origins(),
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["GET"],
         allow_headers=["Accept", "Accept-Language", "Content-Type"],
     )
+else:
+    logger.info("CORS middleware disabled (no origins configured)")
 
 # Include routers with custom logging route class
 # RequestLoggingRoute is applied per-router (not globally) to avoid logging noise
 # from health checks, which get pinged constantly by monitoring tools
-app.include_router(digest.router, route_class=RequestLoggingRoute)
+app.include_router(digest.router)
 
 
 @app.on_event("startup")

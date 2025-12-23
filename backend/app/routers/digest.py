@@ -8,11 +8,12 @@ from fastapi import APIRouter, Query
 
 from app.cache import get_cache_key, get_cached, set_cached
 from app.database import get_digest_entries
+from app.middleware import RequestLoggingRoute
 from app.models import DigestEntry
 
 logger = logging.getLogger("app.routers.digest")
 
-router = APIRouter()
+router = APIRouter(route_class=RequestLoggingRoute)
 
 
 @router.get("/api/digest", response_model=list[DigestEntry])
@@ -45,7 +46,10 @@ async def get_digest(
     entries = [DigestEntry(**row) for row in rows]
     logger.debug(f"Converted {len(entries)} rows to DigestEntry models")
 
-    # Store in cache
-    set_cached(cache_key, entries)
+    # Only cache non-empty results to avoid stale empty responses
+    if entries:
+        set_cached(cache_key, entries)
+    else:
+        logger.debug("Skipping cache for empty result")
 
     return entries

@@ -8,21 +8,22 @@ class Settings(BaseSettings):
     database_url: str = ""
 
     # Cache settings
-    cache_ttl: int = 300
+    cache_ttl: int = 1800
     cache_max_size: int = 10
 
-    # CORS - only used in development when frontend/backend are on different ports
-    # In production, frontend and backend are same-origin (no CORS needed)
+    # CORS - required in production for S3 frontend, development for separate ports
+    # Production: Set to S3 bucket URL(s)
+    # Development: Defaults to localhost:5173 if not set
     cors_origins: str = ""
 
     # Environment: "development" or "production"
     environment: str = "development"
 
     class Config:
-        env_file = ".env"
+        env_file = (".env", ".env.local")
 
     def get_cors_origins(self) -> list[str]:
-        """Parse CORS origins for development use."""
+        """Parse CORS origins from environment variable."""
         if self.cors_origins:
             return [
                 origin.strip()
@@ -39,6 +40,18 @@ class Settings(BaseSettings):
 
         return []
 
+    def should_enable_cors(self) -> bool:
+        """Determine if CORS middleware should be enabled."""
+        # Enable CORS if origins are explicitly configured
+        if self.cors_origins:
+            return True
+
+        # Enable CORS in development with default origins
+        if self.environment == "development":
+            return True
+
+        return False
+
     def validate_production_config(self) -> list[str]:
         """Validate that required settings are configured for production."""
         errors = []
@@ -52,6 +65,10 @@ class Settings(BaseSettings):
                 lower_url = self.database_url.lower()
                 if "secret" in lower_url or "password" in lower_url:
                     errors.append("DATABASE_URL appears to contain default credentials")
+
+            # CORS origins required in production for S3 frontend
+            if not self.cors_origins:
+                errors.append("CORS_ORIGINS is required in production (S3 bucket URL)")
 
         return errors
 
