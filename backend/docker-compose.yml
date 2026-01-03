@@ -8,7 +8,7 @@
 #   ENVIRONMENT=production
 #   CACHE_TTL=1800
 #   CACHE_MAX_SIZE=10
-#   CORS_ORIGINS=https://your-bucket.s3.amazonaws.com,https://your-bucket.s3.us-east-1.amazonaws.com
+#   CORS_ORIGINS=https://danalv.com
 #
 
 services:
@@ -32,9 +32,7 @@ services:
 
   # FastAPI Backend - API endpoints and CORS handling
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/danalv-site-backend:latest
     container_name: daily-digest-backend
     environment:
       - DATABASE_URL=${DATABASE_URL}

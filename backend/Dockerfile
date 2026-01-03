@@ -10,8 +10,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies into a virtual environment
-RUN uv sync --frozen --no-dev
+# Install dependencies only (not the project itself)
+RUN uv sync --frozen --no-dev --no-install-project
 
 # Final stage
 FROM python:3.13-slim

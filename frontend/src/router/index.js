@@ -9,11 +9,19 @@ const router = createRouter({
       path: '/',
       name: 'home',
       component: HomeView,
+      meta: {
+        title: 'Danalv | Home',
+        description: 'Welcome to Danalv',
+      },
     },
     {
       path: '/digest',
       name: 'digest',
       component: DigestView,
+      meta: {
+        title: 'Danalv | Digest',
+        description: 'The Danalv Digest',
+      },
     },
   ],
   scrollBehavior(to, from, savedPosition) {

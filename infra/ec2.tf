@@ -29,6 +29,12 @@ resource "aws_iam_role_policy_attachment" "ssm_core" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# Attach ECR read-only policy for pulling images
+resource "aws_iam_role_policy_attachment" "ecr_read" {
+  role       = aws_iam_role.ec2_ssm.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
 # Instance Profile
 resource "aws_iam_instance_profile" "ec2_ssm" {
   name = "${var.project_name}-${var.environment}-ec2-profile"
