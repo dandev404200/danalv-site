@@ -82,7 +82,7 @@ const projects = [
             <p class="text-slate-400 leading-relaxed mb-10 text-lg md:text-xl">
               Four years of GRC program builds, AppSec assessments, TPRM strategy, and metrics at scale. Now I'm
               applying that knowledge hands-on: developing secure applications, automating controls, and using AI to
-              enhance learning and bring clarity from ambiguity. Security should be a business enabler, not a blocker.
+              enhance learning and bring clarity from ambiguity. Security should be a business enabler not a blocker.
             </p>
 
             <p class="font-mono text-lg text-slate-500 mb-3">$ ls ~/links</p>
