@@ -3,10 +3,10 @@ import TerminalWindow from '../components/TerminalWindow.vue'
 import TimelineItem from '../components/TimelineItem.vue'
 
 const socialLinks = [
-  { name: 'github/', url: 'https://github.com' },
-  { name: 'linkedin/', url: 'https://linkedin.com' },
-  { name: 'substack/', url: 'https://substack.com' },
-  { name: 'discord/', url: 'https://discord.com' },
+  { name: 'github/', url: 'https://github.com/dandev404200' },
+  { name: 'linkedin/', url: 'www.linkedin.com/in/daniel-alvarez-458aa4234t4t455' },
+  { name: 'substack/', url: 'https://substack.com/@dan1923487/reads' },
+  { name: 'discord/', url: 'https://discord.com/users/1248082395601830030' },
 ]
 
 const experiences = [
